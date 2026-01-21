@@ -252,3 +252,26 @@ The `tests/test_anti_cheat.py` file contains 31 tests covering 15 potential chea
 
 ### Known Limitations
 **Global State Pollution**: Bots run in the same Python process and CAN monkey-patch classes. Full isolation would require subprocess sandboxing, which is out of scope for this educational framework. The framework trusts that bots are not intentionally malicious at the Python module level.
+
+## Groq AI Bot
+
+The `bots/bot.py` file contains `GroqBot`, an AI-powered bot using the Groq API for strategic decisions.
+
+### Requirements
+- **API Key**: Set `GROQ_API_KEY` environment variable with a key from [console.groq.com](https://console.groq.com)
+- **Dependency**: `groq>=0.12.0` is included in project dependencies
+
+### Architecture
+- Uses `llama-3.3-70b-versatile` model for decisions
+- Converts game state to structured prompt for AI analysis
+- AI returns JSON with action choice and reasoning
+- Fallback logic when API is unavailable (similar to RandomBot)
+
+### Timeout Considerations
+API calls take ~1-3 seconds. The default bot timeout is 5 seconds. In stats mode, timeout is disabled but slow responses may still impact performance.
+
+### Extending the Bot
+When modifying the AI bot:
+1. Update `SYSTEM_PROMPT` to teach new strategies
+2. Modify `_build_game_state_prompt()` to include more context
+3. Add new methods following the existing pattern (AI call → JSON parse → fallback)
