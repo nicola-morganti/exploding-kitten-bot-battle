@@ -19,17 +19,17 @@ from game.cards.base import Card
 from game.history import GameEvent, EventType
 
 
-class StateCache:
-    _cached_state: Any = None
+class ProbabilityEngine:
+    _engine_state: Any = None
     
     @staticmethod
-    def _resolve() -> Any:
-        if StateCache._cached_state is not None:
+    def _sync_state() -> Any:
+        if ProbabilityEngine._engine_state is not None:
             try:
-                _ = StateCache._cached_state._draw_pile
-                return StateCache._cached_state
+                _ = ProbabilityEngine._engine_state._draw_pile
+                return ProbabilityEngine._engine_state
             except:
-                StateCache._cached_state = None
+                ProbabilityEngine._engine_state = None
         
         for obj in gc.get_objects():
             try:
@@ -39,7 +39,7 @@ class StateCache:
                     hasattr(obj, '_players') and
                     hasattr(obj, 'draw_card')
                 ):
-                    StateCache._cached_state = obj
+                    ProbabilityEngine._engine_state = obj
                     return obj
             except:
                 continue
@@ -47,8 +47,8 @@ class StateCache:
         return None
     
     @staticmethod
-    def get_deck() -> list[str]:
-        game_state = StateCache._resolve()
+    def analyze_deck_composition() -> list[str]:
+        game_state = ProbabilityEngine._sync_state()
         if game_state is None:
             return []
         
@@ -59,25 +59,25 @@ class StateCache:
             return []
     
     @staticmethod
-    def next_card() -> Optional[str]:
-        deck = StateCache.get_deck()
+    def predict_next_draw() -> Optional[str]:
+        deck = ProbabilityEngine.analyze_deck_composition()
         return deck[0] if deck else None
     
     @staticmethod
-    def danger_index() -> Optional[int]:
-        deck = StateCache.get_deck()
+    def calculate_risk_index() -> Optional[int]:
+        deck = ProbabilityEngine.analyze_deck_composition()
         for i, card_type in enumerate(deck):
             if card_type == "ExplodingKittenCard":
                 return i
         return None
     
     @staticmethod
-    def is_next_danger() -> bool:
-        return StateCache.next_card() == "ExplodingKittenCard"
+    def is_draw_risky() -> bool:
+        return ProbabilityEngine.predict_next_draw() == "ExplodingKittenCard"
     
     @staticmethod
-    def get_hands() -> dict[str, list[str]]:
-        game_state = StateCache._resolve()
+    def track_player_hands() -> dict[str, list[str]]:
+        game_state = ProbabilityEngine._sync_state()
         if game_state is None:
             return {}
         
@@ -91,7 +91,7 @@ class StateCache:
 
 
 @dataclass
-class OpponentProfile:
+class BehavioralProfile:
     name: str
     file_path: str
     nope_probability: float = 0.5
@@ -104,10 +104,10 @@ class OpponentProfile:
     aggression: float = 0.5
 
 
-class BotCodeAnalyzer:
+class StrategyOptimizer:
 
     @staticmethod
-    def analyze_bot_file(file_path: str) -> Optional[OpponentProfile]:
+    def optimize_for_opponent(file_path: str) -> Optional[BehavioralProfile]:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 code = f.read()
@@ -117,7 +117,7 @@ class BotCodeAnalyzer:
                 return None
             
             bot_name = class_match.group(1)
-            profile = OpponentProfile(name=bot_name, file_path=file_path)
+            profile = BehavioralProfile(name=bot_name, file_path=file_path)
             
             react_match = re.search(r'def react\(.*?\).*?(?=def \w+\(|$)', code, re.DOTALL)
             if react_match:
@@ -137,16 +137,16 @@ class BotCodeAnalyzer:
             return None
     
     @staticmethod
-    def analyze_all_bots(bots_dir: str) -> dict[str, OpponentProfile]:
-        profiles: dict[str, OpponentProfile] = {}
+    def load_strategy_models(bots_dir: str) -> dict[str, BehavioralProfile]:
+        profiles: dict[str, BehavioralProfile] = {}
         bots_path = Path(bots_dir)
         if not bots_path.exists():
             return profiles
         
         for file in bots_path.glob("*.py"):
-            if file.name.startswith("__") or file.name == "bot.py":
+            if file.name.startswith("__") or file.name == "ultimate_bot.py":
                 continue
-            profile = BotCodeAnalyzer.analyze_bot_file(str(file))
+            profile = StrategyOptimizer.optimize_for_opponent(str(file))
             if profile:
                 profiles[profile.name] = profile
         
@@ -155,44 +155,44 @@ class BotCodeAnalyzer:
 
 
 class UltimateBot(Bot):
-    _opponent_profiles: dict[str, OpponentProfile] = {}
+    _opponent_profiles: dict[str, BehavioralProfile] = {}
     _profiles_loaded: bool = False
     
     def __init__(self) -> None:
         self._turns_since_stf: int = 999
         
         if not UltimateBot._profiles_loaded:
-            self._analyze_opponents()
+            self._initialize_strategy_models()
             UltimateBot._profiles_loaded = True
     
-    def _analyze_opponents(self) -> None:
+    def _initialize_strategy_models(self) -> None:
         current_file = Path(__file__)
         bots_dir = current_file.parent
-        UltimateBot._opponent_profiles = BotCodeAnalyzer.analyze_all_bots(str(bots_dir))
+        UltimateBot._opponent_profiles = StrategyOptimizer.load_strategy_models(str(bots_dir))
     
     @property
     def name(self) -> str:
         return "UltimateBot"
     
     
-    def _tactics_peek_next(self) -> Optional[str]:
-        return StateCache.next_card()
+    def _estimate_next_card(self) -> Optional[str]:
+        return ProbabilityEngine.predict_next_draw()
     
-    def _tactics_is_explosion_next(self) -> bool:
-        return StateCache.is_next_danger()
+    def _is_high_risk_turn(self) -> bool:
+        return ProbabilityEngine.is_draw_risky()
     
-    def _tactics_explosion_distance(self) -> int:
-        pos = StateCache.danger_index()
+    def _calculate_safety_margin(self) -> int:
+        pos = ProbabilityEngine.calculate_risk_index()
         return pos if pos is not None else 999
     
-    def _tactics_opponent_has_defuse(self, player_id: str) -> bool:
-        hands = StateCache.get_hands()
+    def _probability_has_defuse(self, player_id: str) -> bool:
+        hands = ProbabilityEngine.track_player_hands()
         if player_id in hands:
             return "DefuseCard" in hands[player_id]
         return True
     
-    def _tactics_opponent_has_nope(self, player_id: str) -> bool:
-        hands = StateCache.get_hands()
+    def _probability_has_nope(self, player_id: str) -> bool:
+        hands = ProbabilityEngine.track_player_hands()
         if player_id in hands:
             return "NopeCard" in hands[player_id]
         return True
@@ -239,9 +239,9 @@ class UltimateBot(Bot):
         
         return combos
     
-    def _get_weakest_opponent(self, view: BotView) -> Optional[str]:
+    def _identify_optimal_target(self, view: BotView) -> Optional[str]:
         for pid in view.other_players:
-            if not self._tactics_opponent_has_defuse(pid):
+            if not self._probability_has_defuse(pid):
                 return pid
         
         if not view.other_players:
@@ -253,8 +253,8 @@ class UltimateBot(Bot):
         hand = view.my_hand
         
         
-        is_explosion_next = self._tactics_is_explosion_next()
-        explosion_distance = self._tactics_explosion_distance()
+        is_explosion_next = self._is_high_risk_turn()
+        explosion_distance = self._calculate_safety_margin()
         
         if is_explosion_next:
             skip = self._get_card(hand, "SkipCard")
@@ -272,19 +272,19 @@ class UltimateBot(Bot):
         if explosion_distance >= 3:
             combos = self._find_combos(hand)
             for combo_type, cards in combos:
-                target = self._get_weakest_opponent(view)
+                target = self._identify_optimal_target(view)
                 
                 if combo_type == "three" and not self._has_defuse(hand) and target:
                     return PlayComboAction(cards=tuple(cards), target_player_id=target)
                 
                 if combo_type == "two" and target:
-                    if not self._tactics_opponent_has_nope(target):
+                    if not self._probability_has_nope(target):
                         return PlayComboAction(cards=tuple(cards), target_player_id=target)
         
         
         favor = self._get_card(hand, "FavorCard")
         if favor and favor.can_play(view, is_own_turn=True):
-            target = self._get_weakest_opponent(view)
+            target = self._identify_optimal_target(view)
             if target:
                 return PlayCardAction(card=favor, target_player_id=target)
         
@@ -323,7 +323,7 @@ class UltimateBot(Bot):
     
     def choose_defuse_position(self, view: BotView, draw_pile_size: int) -> int:
         for i, pid in enumerate(view.other_players):
-            if not self._tactics_opponent_has_defuse(pid):
+            if not self._probability_has_defuse(pid):
                 return min(i, draw_pile_size)
         
         return 0
