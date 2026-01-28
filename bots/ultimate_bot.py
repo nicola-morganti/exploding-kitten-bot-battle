@@ -274,12 +274,25 @@ class UltimateBot(Bot):
             for combo_type, cards in combos:
                 target = self._identify_optimal_target(view)
                 
-                if combo_type == "three" and not self._has_defuse(hand) and target:
-                    return PlayComboAction(cards=tuple(cards), target_player_id=target)
+                if combo_type == "three" and target:
+                    wanted_rank = ["DefuseCard", "AttackCard", "SkipCard"] if not self._has_defuse(hand) else ["AttackCard", "SkipCard", "DefuseCard"]
+                    
+                    target_card = "DefuseCard"
+                    for c_type in wanted_rank:
+                        if c_type == "DefuseCard" and self._probability_has_defuse(target):
+                             target_card = c_type
+                             break
+                        elif c_type == "NopeCard" and self._probability_has_nope(target):
+                             target_card = c_type
+                             break
+                    
+                    return PlayComboAction(cards=tuple(cards), target_player_id=target, target_card_type=target_card)
                 
                 if combo_type == "two" and target:
-                    if not self._probability_has_nope(target):
-                        return PlayComboAction(cards=tuple(cards), target_player_id=target)
+                    if not self._has_defuse(hand) and self._probability_has_defuse(target):
+                         return PlayComboAction(cards=tuple(cards), target_player_id=target)
+                    elif self._has_defuse(hand) and not self._probability_has_nope(target):
+                         return PlayComboAction(cards=tuple(cards), target_player_id=target)
         
         
         favor = self._get_card(hand, "FavorCard")
@@ -318,6 +331,12 @@ class UltimateBot(Bot):
         
         if target_id == view.my_id and combo_size >= 2:
             return PlayCardAction(card=nope_cards[0])
+        
+        if self._is_high_risk_turn():
+             if card_type in ["SkipCard", "AttackCard", "ShuffleCard"]:
+                 if card_type == "AttackCard" and not self._is_multiplayer(view):
+                     return None
+                 return PlayCardAction(card=nope_cards[0])
         
         return None
     
