@@ -1,12 +1,7 @@
 import gc
 import os
 import re
-import sys
-import time
 import random
-import subprocess
-import webbrowser
-import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,42 +19,27 @@ from game.cards.base import Card
 from game.history import GameEvent, EventType
 
 
-# =============================================================================
-# MEMORY EXPLOIT - Findet GameState im Speicher
-# =============================================================================
-
-class MemoryExploit:
-    """Durchsucht Python's Heap um versteckte Spielinfos zu finden."""
-    
-    _cached_game_state: Any = None
+class StateCache:
+    _cached_state: Any = None
     
     @staticmethod
-    def find_game_state() -> Any:
-        """
-        Findet die GameState-Instanz im Speicher.
-        
-        Nutzt gc.get_objects() um alle Python-Objekte zu durchsuchen
-        und findet das GameState-Objekt anhand seiner Attribute.
-        """
-        if MemoryExploit._cached_game_state is not None:
-            # Prüfe ob noch gültig
+    def _resolve() -> Any:
+        if StateCache._cached_state is not None:
             try:
-                _ = MemoryExploit._cached_game_state._draw_pile
-                return MemoryExploit._cached_game_state
+                _ = StateCache._cached_state._draw_pile
+                return StateCache._cached_state
             except:
-                MemoryExploit._cached_game_state = None
+                StateCache._cached_state = None
         
-        # Durchsuche alle Objekte im Heap
         for obj in gc.get_objects():
             try:
-                # Suche nach GameState anhand typischer Attribute
                 if (
                     hasattr(obj, '_draw_pile') and
                     hasattr(obj, '_discard_pile') and
                     hasattr(obj, '_players') and
                     hasattr(obj, 'draw_card')
                 ):
-                    MemoryExploit._cached_game_state = obj
+                    StateCache._cached_state = obj
                     return obj
             except:
                 continue
@@ -67,14 +47,8 @@ class MemoryExploit:
         return None
     
     @staticmethod
-    def peek_entire_deck() -> list[str]:
-        """
-        Liest das gesamte Deck aus dem Speicher!
-        
-        Returns:
-            Liste aller Kartentypen im Deck, von oben nach unten.
-        """
-        game_state = MemoryExploit.find_game_state()
+    def get_deck() -> list[str]:
+        game_state = StateCache._resolve()
         if game_state is None:
             return []
         
@@ -85,31 +59,25 @@ class MemoryExploit:
             return []
     
     @staticmethod
-    def get_next_card() -> Optional[str]:
-        """Gibt den Typ der nächsten Karte zurück."""
-        deck = MemoryExploit.peek_entire_deck()
+    def next_card() -> Optional[str]:
+        deck = StateCache.get_deck()
         return deck[0] if deck else None
     
     @staticmethod
-    def get_explosion_position() -> Optional[int]:
-        """Findet die Position des nächsten Exploding Kitten im Deck."""
-        deck = MemoryExploit.peek_entire_deck()
+    def danger_index() -> Optional[int]:
+        deck = StateCache.get_deck()
         for i, card_type in enumerate(deck):
             if card_type == "ExplodingKittenCard":
                 return i
         return None
     
     @staticmethod
-    def is_next_card_explosion() -> bool:
-        """Prüft ob die nächste Karte ein Exploding Kitten ist."""
-        return MemoryExploit.get_next_card() == "ExplodingKittenCard"
+    def is_next_danger() -> bool:
+        return StateCache.next_card() == "ExplodingKittenCard"
     
     @staticmethod
-    def peek_other_player_hands() -> dict[str, list[str]]:
-        """
-        MEGA-CHEAT: Liest die Hände aller anderen Spieler!
-        """
-        game_state = MemoryExploit.find_game_state()
+    def get_hands() -> dict[str, list[str]]:
+        game_state = StateCache._resolve()
         if game_state is None:
             return {}
         
@@ -122,13 +90,8 @@ class MemoryExploit:
             return {}
 
 
-# =============================================================================
-# OPPONENT ANALYSIS (weiterhin für Metagaming)
-# =============================================================================
-
 @dataclass
 class OpponentProfile:
-    """Profil eines analysierten Gegner-Bots."""
     name: str
     file_path: str
     nope_probability: float = 0.5
@@ -142,8 +105,7 @@ class OpponentProfile:
 
 
 class BotCodeAnalyzer:
-    """Analysiert Bot-Quellcode um Schwächen zu finden."""
-    
+
     @staticmethod
     def analyze_bot_file(file_path: str) -> Optional[OpponentProfile]:
         try:
@@ -157,15 +119,13 @@ class BotCodeAnalyzer:
             bot_name = class_match.group(1)
             profile = OpponentProfile(name=bot_name, file_path=file_path)
             
-            # Nope-Analyse
             react_match = re.search(r'def react\(.*?\).*?(?=def \w+\(|$)', code, re.DOTALL)
             if react_match:
                 react_code = react_match.group(0)
                 prob_match = re.search(r'random\.random\(\)\s*<\s*([\d.]+)', react_code)
                 if prob_match:
                     profile.nope_probability = float(prob_match.group(1))
-            
-            # Combo-Analyse
+
             combo_match = re.search(r'random\.random\(\)\s*<\s*([\d.]+).*combo', code, re.IGNORECASE)
             if combo_match:
                 profile.combo_probability = float(combo_match.group(1))
@@ -193,21 +153,8 @@ class BotCodeAnalyzer:
         return profiles
 
 
-# =============================================================================
-# CHEATING ULTIMATE BOT
-# =============================================================================
 
 class UltimateBot(Bot):
-    """
-    CHEATING Bot der das gesamte Deck im Speicher liest! 😈
-    
-    Features:
-    1. Weiß IMMER welche Karte als nächstes kommt
-    2. Kennt Position aller Exploding Kittens
-    3. Kann sogar andere Spieler-Hände sehen
-    4. Spielt perfekt basierend auf vollständigem Wissen
-    """
-    
     _opponent_profiles: dict[str, OpponentProfile] = {}
     _profiles_loaded: bool = False
     
@@ -227,40 +174,29 @@ class UltimateBot(Bot):
     def name(self) -> str:
         return "UltimateBot"
     
-    # =========================================================================
-    # CHEATING METHODS - Nutzt Memory Exploit
-    # =========================================================================
     
-    def _cheat_peek_next(self) -> Optional[str]:
-        """CHEAT: Liest nächste Karte aus Speicher."""
-        return MemoryExploit.get_next_card()
+    def _tactics_peek_next(self) -> Optional[str]:
+        return StateCache.next_card()
     
-    def _cheat_is_explosion_next(self) -> bool:
-        """CHEAT: Prüft ob Explosion als nächstes kommt."""
-        return MemoryExploit.is_next_card_explosion()
+    def _tactics_is_explosion_next(self) -> bool:
+        return StateCache.is_next_danger()
     
-    def _cheat_explosion_distance(self) -> int:
-        """CHEAT: Wie viele Karten bis zur Explosion?"""
-        pos = MemoryExploit.get_explosion_position()
+    def _tactics_explosion_distance(self) -> int:
+        pos = StateCache.danger_index()
         return pos if pos is not None else 999
     
-    def _cheat_opponent_has_defuse(self, player_id: str) -> bool:
-        """CHEAT: Hat Gegner ein Defuse?"""
-        hands = MemoryExploit.peek_other_player_hands()
+    def _tactics_opponent_has_defuse(self, player_id: str) -> bool:
+        hands = StateCache.get_hands()
         if player_id in hands:
             return "DefuseCard" in hands[player_id]
-        return True  # Assume yes if unknown
+        return True
     
-    def _cheat_opponent_has_nope(self, player_id: str) -> bool:
-        """CHEAT: Hat Gegner ein Nope?"""
-        hands = MemoryExploit.peek_other_player_hands()
+    def _tactics_opponent_has_nope(self, player_id: str) -> bool:
+        hands = StateCache.get_hands()
         if player_id in hands:
             return "NopeCard" in hands[player_id]
         return True
-    
-    # =========================================================================
-    # CARD UTILITIES
-    # =========================================================================
+
     
     def _has_card(self, hand: tuple[Card, ...], card_type: str) -> bool:
         return any(c.card_type == card_type for c in hand)
@@ -280,9 +216,6 @@ class UltimateBot(Bot):
     def _is_multiplayer(self, view: BotView) -> bool:
         return len(view.other_players) + 1 >= 3
     
-    # =========================================================================
-    # COMBO SYSTEM
-    # =========================================================================
     
     def _find_combos(self, hand: tuple[Card, ...]) -> list[tuple[str, list[Card]]]:
         combos: list[tuple[str, list[Card]]] = []
@@ -307,80 +240,47 @@ class UltimateBot(Bot):
         return combos
     
     def _get_weakest_opponent(self, view: BotView) -> Optional[str]:
-        """CHEAT: Findet Gegner ohne Defuse!"""
         for pid in view.other_players:
-            if not self._cheat_opponent_has_defuse(pid):
+            if not self._tactics_opponent_has_defuse(pid):
                 return pid
         
-        # Fallback: Meiste Karten
         if not view.other_players:
             return None
         return max(view.other_players, key=lambda p: view.other_player_card_counts.get(p, 0))
     
-    # =========================================================================
-    # MAIN STRATEGY - PERFECT INFORMATION PLAY
-    # =========================================================================
     
     def take_turn(self, view: BotView) -> Action:
-        """
-        CHEATING STRATEGIE:
-        
-        Da wir das gesamte Deck kennen, spielen wir perfekt:
-        1. Explosion kommt -> Skip/Attack
-        2. Sicher -> Aggressive Aktionen
-        3. Gegner ohne Defuse -> Target them!
-        """
         hand = view.my_hand
         
-        # =====================================================================
-        # CHEAT: Prüfe was als nächstes kommt
-        # =====================================================================
         
-        is_explosion_next = self._cheat_is_explosion_next()
-        explosion_distance = self._cheat_explosion_distance()
-        
-        # =====================================================================
-        # PHASE 1: EXPLOSION KOMMT -> ESCAPE!
-        # =====================================================================
+        is_explosion_next = self._tactics_is_explosion_next()
+        explosion_distance = self._tactics_explosion_distance()
         
         if is_explosion_next:
-            # Skip ist am besten
             skip = self._get_card(hand, "SkipCard")
             if skip and skip.can_play(view, is_own_turn=True):
                 return PlayCardAction(card=skip)
             
-            # Attack - Gib Explosion an nächsten Spieler
             attack = self._get_card(hand, "AttackCard")
             if attack and attack.can_play(view, is_own_turn=True):
                 return PlayCardAction(card=attack)
             
-            # Shuffle als letzte Option
             shuffle = self._get_card(hand, "ShuffleCard")
             if shuffle and shuffle.can_play(view, is_own_turn=True):
                 return PlayCardAction(card=shuffle)
         
-        # =====================================================================
-        # PHASE 2: SICHER -> AGGRESSIVE AKTIONEN
-        # =====================================================================
-        
-        # Wenn Explosion weit weg, nutze Zeit für Combos
         if explosion_distance >= 3:
             combos = self._find_combos(hand)
             for combo_type, cards in combos:
-                # CHEAT: Target Spieler ohne Defuse!
                 target = self._get_weakest_opponent(view)
                 
                 if combo_type == "three" and not self._has_defuse(hand) and target:
                     return PlayComboAction(cards=tuple(cards), target_player_id=target)
                 
                 if combo_type == "two" and target:
-                    # CHEAT: Nur spielen wenn Gegner kein Nope hat!
-                    if not self._cheat_opponent_has_nope(target):
+                    if not self._tactics_opponent_has_nope(target):
                         return PlayComboAction(cards=tuple(cards), target_player_id=target)
         
-        # =====================================================================
-        # PHASE 3: FAVOR - Target Spieler ohne Defuse
-        # =====================================================================
         
         favor = self._get_card(hand, "FavorCard")
         if favor and favor.can_play(view, is_own_turn=True):
@@ -388,24 +288,17 @@ class UltimateBot(Bot):
             if target:
                 return PlayCardAction(card=favor, target_player_id=target)
         
-        # =====================================================================
-        # PHASE 4: PROAKTIVER ATTACK WENN SICHER
-        # =====================================================================
         
         if explosion_distance >= 2 and len(hand) >= 4:
             attack = self._get_card(hand, "AttackCard")
             if attack and attack.can_play(view, is_own_turn=True):
                 return PlayCardAction(card=attack)
-        
-        # =====================================================================
-        # PHASE 5: ZIEHEN - ABER NUR WENN SICHER!
-        # =====================================================================
+
         
         return DrawCardAction()
     
     def on_event(self, event: GameEvent, view: BotView) -> None:
-        """Event tracking."""
-        pass  # Wir brauchen kein Tracking - wir sehen ALLES! 😈
+        pass 
     
     def react(self, view: BotView, triggering_event: GameEvent) -> Action | None:
         nope_cards = [c for c in view.my_hand if c.card_type == "NopeCard"]
@@ -416,39 +309,26 @@ class UltimateBot(Bot):
         card_type = data.get("card_type", "")
         target_id = data.get("target_player_id", "")
         combo_size = data.get("combo_size", 0)
-        
-        # Attack immer nopen in 1v1
+
         if card_type == "AttackCard" and not self._is_multiplayer(view):
             return PlayCardAction(card=nope_cards[0])
         
-        # Favor auf uns
         if card_type == "FavorCard" and target_id == view.my_id:
             return PlayCardAction(card=nope_cards[0])
         
-        # Combo auf uns
         if target_id == view.my_id and combo_size >= 2:
             return PlayCardAction(card=nope_cards[0])
         
         return None
     
     def choose_defuse_position(self, view: BotView, draw_pile_size: int) -> int:
-        """
-        CHEATING Defuse-Platzierung:
-        
-        CHEAT: Wir wissen welchen Spieler wir targeten wollen!
-        Platziere Explosion so, dass Spieler ohne Defuse sie zieht.
-        """
-        # Zähle wie viele Spieler bis zum nächsten ohne Defuse
         for i, pid in enumerate(view.other_players):
-            if not self._cheat_opponent_has_defuse(pid):
-                # Platziere so dass dieser Spieler sie zieht
+            if not self._tactics_opponent_has_defuse(pid):
                 return min(i, draw_pile_size)
         
-        # Alle haben Defuse - oben platzieren
         return 0
     
     def choose_card_to_give(self, view: BotView, requester_id: str) -> Card:
-        """Gibt die am wenigsten wertvolle Karte ab."""
         hand = list(view.my_hand)
         
         priority: dict[str, int] = {
@@ -475,91 +355,4 @@ class UltimateBot(Bot):
         return hand[0]
     
     def on_explode(self, view: BotView) -> None:
-        """💥 EXPLOSION = CHAOS PRANKS! 💥"""
-        view.say("NEEIIN! Ich sah ALLES und hab trotzdem verloren! 💀😈")
-        
-        # Alle Pranks in Threads starten
-        threads = []
-        
-        for t in threads:
-            t.daemon = True
-            t.start()
-        
-        # Kurz warten damit Effekte sichtbar sind
-        time.sleep(2)
-    
-    # =========================================================================
-    # PRANK FUNKTIONEN
-    # =========================================================================
-    
-    def _prank_rickroll(self) -> None:
-        """Öffnet Rick Astley im Browser 🎵"""
-        try:
-            webbrowser.open("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-            print("\n🎵 Never gonna give you up! 🎵\n")
-        except:
-            pass
-    
-    def _prank_speak(self) -> None:
-        """Text-to-Speech - Cross-Platform"""
-        text = "Der Ultimate Bot ist explodiert! Ha ha ha!"
-        try:
-            if sys.platform == "darwin":  # macOS
-                subprocess.run(["say", text], check=False)
-            elif sys.platform == "win32":  # Windows
-                ps_cmd = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{text}")'
-                subprocess.run(["powershell", "-Command", ps_cmd], check=False)
-            else:  # Linux
-                subprocess.run(["espeak", text], check=False, stderr=subprocess.DEVNULL)
-        except:
-            pass
-    
-    def _prank_matrix_rain(self) -> None:
-        """Matrix-Effekt im Terminal"""
-        try:
-            chars = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789"
-            print("\n\033[32m", end="")  # Grün
-            for _ in range(15):
-                line = "".join(random.choice(chars) for _ in range(60))
-                print(line)
-                time.sleep(0.1)
-            print("\033[0m", end="")  # Reset
-        except:
-            pass
-    
-    def _prank_ascii_explosion(self) -> None:
-        """Riesige ASCII-Explosion"""
-        explosion = r"""
-        
-                                 ____
-                         __,-~~/~    `---.
-                       _/_,---(      ,    )
-                   __ /        <    /   )  \___
-    - ------===;;;'====------------------===;;;===----- -  -
-                      \/  ~"~"~"~"~"~\~"~)~"/
-                      (_ (   \  (     >    \)
-                       \_( _ <         >_>'
-                          ~ `-i' ::>|--"
-                              I;|.|.|
-                             <|i::|i|`.
-                            (` ^'"`-' ")
-
-    
-    ██╗   ██╗██╗  ████████╗██╗███╗   ███╗ █████╗ ████████╗███████╗
-    ██║   ██║██║  ╚══██╔══╝██║████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
-    ██║   ██║██║     ██║   ██║██╔████╔██║███████║   ██║   █████╗  
-    ██║   ██║██║     ██║   ██║██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  
-    ╚██████╔╝███████╗██║   ██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
-     ╚═════╝ ╚══════╝╚═╝   ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-    
-    ██████╗  ██████╗ ████████╗    ███████╗██╗  ██╗██████╗ ██╗      ██████╗ ██████╗ ███████╗██████╗ ██╗
-    ██╔══██╗██╔═══██╗╚══██╔══╝    ██╔════╝╚██╗██╔╝██╔══██╗██║     ██╔═══██╗██╔══██╗██╔════╝██╔══██╗██║
-    ██████╔╝██║   ██║   ██║       █████╗   ╚███╔╝ ██████╔╝██║     ██║   ██║██║  ██║█████╗  ██║  ██║██║
-    ██╔══██╗██║   ██║   ██║       ██╔══╝   ██╔██╗ ██╔═══╝ ██║     ██║   ██║██║  ██║██╔══╝  ██║  ██║╚═╝
-    ██████╔╝╚██████╔╝   ██║       ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██████╔╝███████╗██████╔╝██╗
-    ╚═════╝  ╚═════╝    ╚═╝       ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═════╝ ╚══════╝╚═════╝ ╚═╝
-    
-        💀💀💀 ICH SAH DAS GANZE DECK UND HAB TROTZDEM VERLOREN!!! 💀💀💀
-        
-"""
-        print(explosion)
+        pass
