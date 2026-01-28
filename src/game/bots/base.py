@@ -32,6 +32,7 @@ class PlayComboAction:
     
     cards: tuple[Card, ...]
     target_player_id: str | None = None
+    target_card_type: str | None = None  # For 3-of-a-kind (naming a card) OR 5-different (picking from discard)
 
 
 @dataclass(frozen=True)

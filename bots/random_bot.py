@@ -262,10 +262,31 @@ class RandomBot(Bot):
             if combo_type in ("two_of_a_kind", "three_of_a_kind"):
                 if view.other_players:
                     target = random.choice(view.other_players)
-                    return PlayComboAction(cards=combo_cards, target_player_id=target)
+                    target_card_type = None
+                    if combo_type == "three_of_a_kind":
+                        # Randomly guess a card type to steal
+                        all_card_types = [
+                            "DefuseCard", "NopeCard", "AttackCard", "SkipCard", 
+                            "SeeTheFutureCard", "ShuffleCard", "FavorCard",
+                            "TacoCat", "BeardCat", "RainbowRalphingCat", "HairyPotatoCat", "Cattermelon"
+                        ]
+                        target_card_type = random.choice(all_card_types)
+                        
+                    return PlayComboAction(
+                        cards=combo_cards, 
+                        target_player_id=target,
+                        target_card_type=target_card_type
+                    )
             # Five different doesn't need a target (draws from discard)
             elif combo_type == "five_different":
-                return PlayComboAction(cards=combo_cards)
+                # Pick a random type that is actually in the discard pile
+                # If discard is empty, we play it blindly (game will log it empty)
+                target_card_type = None
+                if view.discard_pile:
+                    random_card = random.choice(view.discard_pile)
+                    target_card_type = random_card.card_type
+                
+                return PlayComboAction(cards=combo_cards, target_card_type=target_card_type)
         
         # =====================================================================
         # STRATEGY: 50% chance to play a card, 50% to just draw
