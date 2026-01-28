@@ -178,8 +178,9 @@ class UltimateBot(Bot):
     def _estimate_next_card(self) -> Optional[str]:
         return ProbabilityEngine.predict_next_draw()
     
-    def _is_high_risk_turn(self) -> bool:
-        return ProbabilityEngine.is_draw_risky()
+    def _is_high_risk_turn(self, view: BotView) -> bool:
+        risk_index = self._calculate_safety_margin()
+        return risk_index < view.my_turns_remaining
     
     def _calculate_safety_margin(self) -> int:
         pos = ProbabilityEngine.calculate_risk_index()
@@ -252,60 +253,36 @@ class UltimateBot(Bot):
     def take_turn(self, view: BotView) -> Action:
         hand = view.my_hand
         
+        risk_index = self._calculate_safety_margin()
+        turns_to_survive = view.my_turns_remaining
+        is_in_danger = risk_index < turns_to_survive
         
-        is_explosion_next = self._is_high_risk_turn()
-        explosion_distance = self._calculate_safety_margin()
-        
-        if is_explosion_next:
-            skip = self._get_card(hand, "SkipCard")
-            if skip and skip.can_play(view, is_own_turn=True):
-                return PlayCardAction(card=skip)
-            
+        if is_in_danger:
             attack = self._get_card(hand, "AttackCard")
             if attack and attack.can_play(view, is_own_turn=True):
                 return PlayCardAction(card=attack)
             
-            shuffle = self._get_card(hand, "ShuffleCard")
-            if shuffle and shuffle.can_play(view, is_own_turn=True):
-                return PlayCardAction(card=shuffle)
-        
-        if explosion_distance >= 3:
+            skip = self._get_card(hand, "SkipCard")
+            if skip and skip.can_play(view, is_own_turn=True):
+                return PlayCardAction(card=skip)
+            
+            if risk_index == 0:
+                shuffle = self._get_card(hand, "ShuffleCard")
+                if shuffle and shuffle.can_play(view, is_own_turn=True):
+                    return PlayCardAction(card=shuffle)
+
+        if not self._has_defuse(hand):
             combos = self._find_combos(hand)
             for combo_type, cards in combos:
                 target = self._identify_optimal_target(view)
                 
                 if combo_type == "three" and target:
-                    wanted_rank = ["DefuseCard", "AttackCard", "SkipCard"] if not self._has_defuse(hand) else ["AttackCard", "SkipCard", "DefuseCard"]
-                    
-                    target_card = "DefuseCard"
-                    for c_type in wanted_rank:
-                        if c_type == "DefuseCard" and self._probability_has_defuse(target):
-                             target_card = c_type
-                             break
-                        elif c_type == "NopeCard" and self._probability_has_nope(target):
-                             target_card = c_type
-                             break
-                    
-                    return PlayComboAction(cards=tuple(cards), target_player_id=target, target_card_type=target_card)
+                     if self._probability_has_defuse(target):
+                        return PlayComboAction(cards=tuple(cards), target_player_id=target, target_card_type="DefuseCard")
                 
                 if combo_type == "two" and target:
-                    if not self._has_defuse(hand) and self._probability_has_defuse(target):
-                         return PlayComboAction(cards=tuple(cards), target_player_id=target)
-                    elif self._has_defuse(hand) and not self._probability_has_nope(target):
-                         return PlayComboAction(cards=tuple(cards), target_player_id=target)
-        
-        
-        favor = self._get_card(hand, "FavorCard")
-        if favor and favor.can_play(view, is_own_turn=True):
-            target = self._identify_optimal_target(view)
-            if target:
-                return PlayCardAction(card=favor, target_player_id=target)
-        
-        
-        if explosion_distance >= 2 and len(hand) >= 4:
-            attack = self._get_card(hand, "AttackCard")
-            if attack and attack.can_play(view, is_own_turn=True):
-                return PlayCardAction(card=attack)
+                     if self._probability_has_defuse(target):
+                        return PlayComboAction(cards=tuple(cards), target_player_id=target)
 
         
         return DrawCardAction()
@@ -332,7 +309,7 @@ class UltimateBot(Bot):
         if target_id == view.my_id and combo_size >= 2:
             return PlayCardAction(card=nope_cards[0])
         
-        if self._is_high_risk_turn():
+        if self._is_high_risk_turn(view):
              if card_type in ["SkipCard", "AttackCard", "ShuffleCard"]:
                  if card_type == "AttackCard" and not self._is_multiplayer(view):
                      return None
